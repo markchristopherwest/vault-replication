@@ -1,0 +1,34 @@
+adminPassword: "changeme"
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: loki
+        type: loki
+        url: http://loki.telemetry.svc.cluster.local:3100
+        access: proxy
+        isDefault: false
+      - name: prometheus
+        type: prometheus
+        url: http://prometheus.telemetry.svc.cluster.local:9090
+        access: proxy
+        isDefault: true
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+    - name: 'default'
+      orgId: 1
+      folder: ''
+      type: file
+      disableDeletion: true
+      editable: true
+      options:
+        path: /var/lib/grafana/dashboards/default
+dashboards:
+  default:
+    %{ for dashboard in custom_dashboards ~}
+${indent(4, replace(replace(dashboard, ".json", ""), "./", ""))}:
+      json: |
+        ${indent(8, file("${module_path}/custom_dashboards/${dashboard}"))}
+    %{ endfor }

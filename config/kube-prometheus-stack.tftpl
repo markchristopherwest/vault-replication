@@ -1,0 +1,79 @@
+grafana:
+  adminPassword: "changeme"
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: loki
+          type: loki
+          url: http://loki:3100
+          access: proxy
+          isDefault: false
+          basicAuth: false
+          editable: false
+        - name: prometheus
+          type: prometheus
+          url: http://kube-prometheus-stack-prometheus:9090
+          access: proxy
+          isDefault: true
+          basicAuth: false
+          editable: true
+          jsonData:
+            graphiteVersion: "1.1"
+            tlsAuth: false
+            tlsAuthWithCACert: false
+  dashboardProviders:
+    dashboardproviders.yaml:
+     apiVersion: 1
+     providers:
+      - name: 'vault'
+        orgId: 1
+        folder: ''
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 10
+        allowUiUpdates: true
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards/app2
+  dashboards:
+    vault:
+      vault-dashboard:
+        url: https://grafana.com/grafana/dashboards/12904-hashicorp-vault/
+prometheus:
+  prometheusSpec:
+    additionalScrapeConfigs:
+    - job_name: prometheus
+      scrape_interval: 5s
+      static_configs:
+        - targets: ["kube-prometheus-stack-prometheus:9090"]
+    - job_name: cadvisor
+      scrape_interval: 5s
+      static_configs:
+        - targets: ["cadvisor:8080"]
+    - job_name: vault
+      metrics_path: /v1/sys/metrics
+      params:
+        format: ["prometheus"]
+      scheme: http
+      authorization:
+        credentials_file: prometheus-token
+      static_configs:
+        - targets:
+            [
+              "vault-primary-0.vault-primary-internal.north.svc.cluster.local:8200",
+              "vault-primary-1.vault-primary-internal.north.svc.cluster.local:8200",
+              "vault-primary-2.vault-primary-internal.north.svc.cluster.local:8200",
+              "vault-dr-0.vault-dr-internal.south.svc.cluster.local:8200",
+              "vault-dr-1.vault-dr-internal.south.svc.cluster.local:8200",
+              "vault-dr-2.vault-dr-internal.south.svc.cluster.local:8200",
+              "vault-pr-east-0.vault-pr-east-internal.east.svc.cluster.local:8200",
+              "vault-pr-east-1.vault-pr-east-internal.east.svc.cluster.local:8200",
+              "vault-pr-east-2.vault-pr-east-internal.east.svc.cluster.local:8200",
+              "vault-pr-west-0.vault-pr-west-internal.west.svc.cluster.local:8200",
+              "vault-pr-west-1.vault-pr-west-internal.west.svc.cluster.local:8200",
+              "vault-pr-west-2.vault-pr-west-internal.west.svc.cluster.local:8200",
+              "vault-kms-0.vault-kms-internal.north.svc.cluster.local:8200",
+              "vault-kms-1.vault-kms-internal.north.svc.cluster.local:8200",
+              "vault-kms-2.vault-kms-internal.north.svc.cluster.local:8200",
+            ]

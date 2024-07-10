@@ -1,0 +1,276 @@
+# /bin/bash
+
+# Setup your Environment
+export KUBE_CONFIG_PATH=~/.kube/config
+
+minikube delete && \
+    minikube start --memory 7680 --cpus 8 && \
+    rm -f externals/*.json && \
+    rm -f terraform** && \
+    rm -rf tls/**
+
+
+echo "sleeping for .5 minute(s) while the minikube deployments settle..."
+sleep 30 
+
+terraform init
+
+terraform apply -auto-approve
+
+echo "sleeping for 1 minute(s) while the helm deployments settle..."
+sleep 60
+
+for cluster_type in "dr" "kms" "primary" "pr-east" "pr-west"; do
+    if [[ "$cluster_type" == "dr" ]]; then
+        ns=south
+    fi
+    if [[ "$cluster_type" == "kms" ]]; then
+        ns=north
+    fi
+    if [[ "$cluster_type" == "primary" ]]; then
+        ns=north
+    fi
+    if [[ "$cluster_type" == "pr-east" ]]; then
+        ns=east
+    fi
+    if [[ "$cluster_type" == "pr-west" ]]; then
+        ns=west
+    fi
+    echo "running vault operator init on vault-$cluster_type-0 in $ns"
+    kubectl -n $ns exec "vault-${cluster_type}-0" -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true vault operator init -format=json" > externals/vault_operator_init_${cluster_type}.json
+    # echo "ran vault operator init on vault-$cluster_type-0 in $ns"
+done
+
+echo "sleeping for 1 minute(s) while the vault operator init settles..."
+sleep 60 
+
+for cluster_type in "dr" "kms" "primary" "pr-east" "pr-west"; do
+    ROOT_TOKEN=$(cat externals/vault_operator_init_${cluster_type}.json | jq -r .root_token)
+    UNSEAL_KEY_0=$(cat externals/vault_operator_init_${cluster_type}.json | jq -r '.unseal_keys_b64.[0]')
+    UNSEAL_KEY_1=$(cat externals/vault_operator_init_${cluster_type}.json | jq -r '.unseal_keys_b64.[1]')
+    UNSEAL_KEY_2=$(cat externals/vault_operator_init_${cluster_type}.json | jq -r '.unseal_keys_b64.[2]')
+    if [[ "$cluster_type" == "dr" ]]; then
+        ns=south
+    fi
+    if [[ "$cluster_type" == "kms" ]]; then
+        ns=north
+    fi
+    if [[ "$cluster_type" == "primary" ]]; then
+        ns=north
+    fi
+    if [[ "$cluster_type" == "pr-east" ]]; then
+        ns=east
+    fi
+    if [[ "$cluster_type" == "pr-west" ]]; then
+        ns=west
+    fi
+    kubectl -n $ns exec vault-${cluster_type}-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true vault operator unseal $UNSEAL_KEY_0"
+    kubectl -n $ns exec vault-${cluster_type}-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true vault operator unseal $UNSEAL_KEY_1"
+    kubectl -n $ns exec vault-${cluster_type}-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true vault operator unseal $UNSEAL_KEY_2"
+    sleep 2
+    kubectl -n $ns exec vault-${cluster_type}-1 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true vault operator unseal $UNSEAL_KEY_0"
+    kubectl -n $ns exec vault-${cluster_type}-1 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true vault operator unseal $UNSEAL_KEY_1"
+    kubectl -n $ns exec vault-${cluster_type}-1 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true vault operator unseal $UNSEAL_KEY_2"
+    sleep 2
+    kubectl -n $ns exec vault-${cluster_type}-2 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true vault operator unseal $UNSEAL_KEY_0"
+    kubectl -n $ns exec vault-${cluster_type}-2 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true vault operator unseal $UNSEAL_KEY_1"
+    kubectl -n $ns exec vault-${cluster_type}-2 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true vault operator unseal $UNSEAL_KEY_2"
+    sleep 2
+done
+
+for cluster_type in "dr" "kms" "primary" "pr-east" "pr-west"; do
+    ROOT_TOKEN=$(cat externals/vault_operator_init_${cluster_type}.json | jq -r .root_token)
+    UNSEAL_KEY_0=$(cat externals/vault_operator_init_${cluster_type}.json | jq -r '.unseal_keys_b64.[0]')
+    UNSEAL_KEY_1=$(cat externals/vault_operator_init_${cluster_type}.json | jq -r '.unseal_keys_b64.[1]')
+    UNSEAL_KEY_2=$(cat externals/vault_operator_init_${cluster_type}.json | jq -r '.unseal_keys_b64.[2]')
+    if [[ "$cluster_type" == "dr" ]]; then
+        ns=south
+    fi
+    if [[ "$cluster_type" == "kms" ]]; then
+        ns=north
+    fi
+    if [[ "$cluster_type" == "primary" ]]; then
+        ns=north
+    fi
+    if [[ "$cluster_type" == "pr-east" ]]; then
+        ns=east
+    fi
+    if [[ "$cluster_type" == "pr-west" ]]; then
+        ns=west
+    fi
+    kubectl -n $ns exec vault-${cluster_type}-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true vault login ${ROOT_TOKEN}"
+    kubectl -n $ns exec vault-${cluster_type}-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true vault status"
+    kubectl -n $ns exec vault-${cluster_type}-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true vault operator raft list-peers"
+done
+
+# On the Primary Vault Cluster
+
+# https://developer.hashicorp.com/vault/tutorials/enterprise/disaster-recovery#enable-dr-primary-replication
+
+cluster_type="primary"
+ns="north"
+
+ROOT_TOKEN=$(cat externals/vault_operator_init_${cluster_type}.json | jq -r .root_token)
+VAULT_TOKEN=$ROOT_TOKEN
+
+kubectl -n $ns exec vault-${cluster_type}-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+  vault login ${ROOT_TOKEN}"
+
+
+# 1. On the DR primary cluster (Cluster A), create a policy named "dr-secondary-promotion" allowing the update operation against the sys/replication/dr/secondary/promote path. In addition, you can add a policy against the sys/replication/dr/secondary/update-primary path so that you can use the same DR operation token to update the primary cluster that the secondary cluster points to.
+kubectl cp ./policy/dr-secondary-promotion.hcl north/vault-primary-0:/tmp/dr-secondary-promotion.hcl
+kubectl -n north exec vault-primary-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+  vault policy write dr-secondary-promotion /tmp/dr-secondary-promotion.hcl"
+
+# 2. Verify to make sure that the policy was created.
+kubectl -n north exec vault-primary-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+  vault policy list"
+
+# 3. Create a token role named "failover-handler" with the dr-secondary-promotion policy attached and its type should be batch. Batch tokens cannot be renewed, so set the renewable parameter value to false. Also, set the orphan parameter to true.
+
+kubectl -n north exec vault-primary-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+  vault write auth/token/roles/failover-handler \
+    allowed_policies=dr-secondary-promotion \
+    orphan=true \
+    renewable=false \
+    token_type=batch"
+
+kubectl -n north exec vault-primary-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+  vault token create \
+    -role=failover-handler \
+    -ttl=8h \
+    -format=json" > externals/auth-token-failover-handler-primary.json
+
+kubectl -n north exec vault-primary-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+  vault write -f sys/replication/dr/primary/enable"
+
+sleep 10
+
+kubectl -n north exec vault-primary-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+  vault write sys/replication/dr/primary/secondary-token \
+    ca_file=/vault/userconfig/vault-primary/ca.crt \
+    ca_path=/vault/userconfig/vault-primary/ \
+    id='vault-dr-0.vault-dr-internal.south.svc.cluster.local' \
+    -format=json" > externals/primary-secondary-token.json
+
+WRAPPING_TOKEN=$(cat externals/primary-secondary-token.json | jq -r .wrap_info.token)
+
+cluster_type="dr"
+ns="south"
+
+ROOT_TOKEN=$(cat externals/vault_operator_init_${cluster_type}.json | jq -r .root_token)
+VAULT_TOKEN=$ROOT_TOKEN
+
+kubectl -n $ns exec vault-${cluster_type}-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+  vault login ${ROOT_TOKEN}"
+
+kubectl -n south exec vault-dr-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+  vault write sys/replication/dr/secondary/enable \
+    ca_file=/vault/userconfig/vault-dr/ca.crt \
+    ca_path=/vault/userconfig/vault-dr/ \
+    token=\"$WRAPPING_TOKEN\" \
+    primary_api_addr=https://vault-primary-0.vault-primary-internal.north.svc.cluster.local:8200"
+
+# # Only do this to begin DR Operation
+# for cluster_type in "dr"; do
+#     if [[ "$cluster_type" == "dr" ]]; then
+#         ns=south
+#     fi
+#     echo "processing vault-$cluster_type-0 in $ns"
+#     kubectl -n ${ns} exec vault-${cluster_type}-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+#         vault operator generate-root -dr-token -init -format=json" > externals/vault_operator_generate_root_init.json
+
+#     DR_OPERATION_NONCE=$(cat externals/vault_operator_generate_root_init.json | jq -r .nonce)
+#     DR_OTP=$(cat externals/vault_operator_generate_root_init.json | jq -r .otp)
+
+#     ROOT_TOKEN=$(cat externals/vault_operator_init_primary.json | jq -r .root_token)
+#     UNSEAL_KEY_0=$(cat externals/vault_operator_init_primary.json | jq -r '.unseal_keys_b64.[0]')
+#     UNSEAL_KEY_1=$(cat externals/vault_operator_init_primary.json | jq -r '.unseal_keys_b64.[1]')
+#     UNSEAL_KEY_2=$(cat externals/vault_operator_init_primary.json | jq -r '.unseal_keys_b64.[2]')
+
+#     kubectl -n $ns exec vault-${cluster_type}-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+#     vault login ${ROOT_TOKEN}"
+
+#     kubectl -n $ns exec vault-${cluster_type}-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+#         vault operator generate-root -dr-token -format=json \
+#             -nonce=${DR_OPERATION_NONCE} \
+#             $UNSEAL_KEY_0 " > externals/vault_operator_generate_root_${cluster_type}_0.json
+
+#     kubectl -n $ns exec vault-${cluster_type}-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+#         vault operator generate-root -dr-token -format=json \
+#             -nonce=${DR_OPERATION_NONCE} \
+#             $UNSEAL_KEY_1 " > externals/vault_operator_generate_root_${cluster_type}_1.json
+
+#     kubectl -n $ns exec vault-${cluster_type}-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+#         vault operator generate-root -dr-token -format=json \
+#             -nonce=${DR_OPERATION_NONCE} \
+#             $UNSEAL_KEY_2 " > externals/vault_operator_generate_root_${cluster_type}_2.json
+
+#     DR_ENCODED_TOKEN=$(cat externals/vault_operator_generate_root_${cluster_type}_2.json | jq -r .encoded_token)
+
+#     kubectl -n $ns exec vault-${cluster_type}-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+#         vault operator generate-root -dr-token -format=json \
+#             -decode="${DR_ENCODED_TOKEN}" \
+#             -otp=\"${DR_OTP}\"" > externals/vault_operator_generate_root_dr_token_${cluster_primary}.json
+
+#     DR_OPERATION_TOKEN=$(cat externals/vault_operator_generate_root_dr_token_${cluster_primary}.json | jq -r .token)
+
+#     kubectl -n $ns exec vault-${cluster_type}-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+#         vault write sys/replication/dr/secondary/promote \
+#             dr_operation_token=$DR_OPERATION_TOKEN -format=json" > externals/vault_write_sys_replication_dr_secondary_promote_${cluster_type}.json
+
+
+
+# done
+
+# Setup Performance Replication
+
+# # On the primary cluster, create a superuser policy.
+# kubectl cp ./policy/superuser.hcl north/vault-primary-0:/tmp/superuser.hcl
+# kubectl -n north exec vault-primary-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+#   vault policy write superuser /tmp/superuser.hcl"
+
+# # Enable the userpass auth method.
+# kubectl -n north exec vault-primary-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+#   vault auth enable userpass"
+
+# # Create a new user named tester in userpass where the password is changeme and superuser policy is attached.
+# kubectl -n north exec vault-primary-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+#   vault write auth/userpass/users/tester password=\"changeme\" policies=\"superuser\""
+
+# # To activate the primary, run:
+# kubectl -n north exec vault-primary-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+#   vault write -format=json -f sys/replication/performance/primary/enable"
+
+# # To fetch a secondary bootstrap token, run:
+
+# kubectl -n north exec vault-primary-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+#   vault write sys/replication/performance/primary/secondary-token \
+#     id=vault-pr-east-0.vault-pr-east-internal.east.svc.cluster.local \
+#     -format=json" >  externals/vault_write_sys_replication_performance_primary_enable_pr_east.json
+
+
+# kubectl -n north exec vault-primary-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+#   vault write sys/replication/performance/primary/secondary-token \
+#     id=vault-pr-west-0.vault-pr-west-internal.west.svc.cluster.local \
+#     -format=json" >  externals/vault_write_sys_replication_performance_primary_enable_pr_west.json
+
+
+# # To activate a secondary using the fetched token, run:
+# PR_TOKEN_EAST=$(cat  externals/vault_write_sys_replication_performance_primary_enable_pr_east.json | jq -r .wrap_info.token )
+
+# kubectl -n east exec vault-pr-east-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+#   vault write sys/replication/performance/secondary/enable \
+#     ca_file=/vault/userconfig/vault-pr-east/ca.crt \
+#     ca_path=/vault/userconfig/vault-pr-east/ \
+#     token=\"$PR_TOKEN_EAST\" \
+#     primary_api_addr=https://vault-primary-0.vault-primary-internal.north.svc.cluster.local:8200"
+
+# PR_TOKEN_WEST=$(cat  externals/vault_write_sys_replication_performance_primary_enable_pr_west.json | jq -r .wrap_info.token )
+
+# kubectl -n west exec vault-pr-west-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+#   vault write sys/replication/performance/secondary/enable \
+#     ca_file=/vault/userconfig/vault-pr-west/ca.crt \
+#     ca_path=/vault/userconfig/vault-pr-west/ \
+#     token=\"$PR_TOKEN_WEST\" \
+#     primary_api_addr=https://vault-primary-0.vault-primary-internal.north.svc.cluster.local:8200"

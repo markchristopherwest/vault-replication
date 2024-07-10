@@ -1,0 +1,56 @@
+
+
+
+grafana:
+  adminPassword: "changeme"
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: loki
+          type: loki
+          url: http://loki.telemetry.svc.cluster.local:3100
+          access: proxy
+          isDefault: false
+        - name: prometheus
+          type: prometheus
+          url: http://prometheus.telemetry.svc.cluster.local:9090
+          access: proxy
+          isDefault: true
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+      - name: 'default'
+        orgId: 1
+        folder: ''
+        type: file
+        disableDeletion: true
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards/default
+  dashboards:
+    default:
+      %{ for dashboard in custom_dashboards ~}
+${indent(4, replace(replace(dashboard, ".json", ""), "./", ""))}:
+        json: |
+          ${indent(8, file("${module_path}/custom_dashboards/${dashboard}"))}
+      %{ endfor }
+prometheus:
+  additionalScrapeConfigs:
+  - job_name: vault
+    metrics_path: /v1/sys/metrics
+    params:
+      format: ["prometheus"]
+    scheme: http
+    authorization:
+      credentials_file: /etc/prometheus/prometheus-token
+    static_configs:
+      - targets:
+          [
+            "vault-primary-0.vault-primary-internal.north.svc.cluster.local:8200",
+            "vault-dr-0.vault-dr-internal.south.svc.cluster.local:8200",
+            "vault-pr-east-0.vault-pr-east-internal.east.svc.cluster.local:8200",
+            "vault-pr-west-0.vault-pr-west-internal.west.svc.cluster.local:8200",
+            "vault-kms-0.vault-kms-internal.north.svc.cluster.local:8200",
+          ]

@@ -16,7 +16,8 @@ locals {
       location = "west"
     },
   }
-  regions = ["north", "south", "east", "west"]
+  helm_release_version = "0.8.1"
+  regions              = ["north", "south", "east", "west"]
   standard_tags = {
     whoami = data.external.whoami.result["whoami"]
   }
@@ -33,8 +34,9 @@ resource "random_pet" "env" {
 module "tls_automagically" {
   source            = "github.com/markchristopherwest/terraform-tls-automagically"
   product_manifest  = local.cluster_manifest
-  organization_name = "${format("%s", resource.random_pet.env.id)} Unlimited"
-  common_name_ca    = "${format("%s", resource.random_pet.env.id)}.local"
+  organization_name = "${format("%s", data.external.whoami.result["whoami"])} Unlimited"
+  common_name_ca    = "${replace(format("%s", data.external.whoami.result["whoami"]), ".", "-")}.local"
+  common_name_int   = "${replace(format("%s", random_pet.env.id), "_", "-")}.${replace(format("%s", data.external.whoami.result["whoami"]), ".", "-")}.local"
   dns_names = concat(
     formatlist("vault-%s.vault-%s-internal", keys(local.cluster_manifest), keys(local.cluster_manifest)),
     formatlist("vault-%s-0.vault-%s-internal", keys(local.cluster_manifest), keys(local.cluster_manifest)),
@@ -56,6 +58,14 @@ resource "local_file" "ca_key" {
 resource "local_file" "ca_crt" {
   content  = module.tls_automagically.content_tls_ca_crt
   filename = "${path.module}/tls/_ca.crt"
+}
+resource "local_file" "int_key" {
+  content  = module.tls_automagically.content_tls_int_key
+  filename = "${path.module}/tls/_int.key"
+}
+resource "local_file" "int_crt" {
+  content  = module.tls_automagically.content_tls_int_crt
+  filename = "${path.module}/tls/_int.crt"
 }
 # resource "local_file" "ca_csr" {
 #   content  = tls_self_signed_cert.ca.
@@ -111,7 +121,7 @@ resource "kubernetes_secret" "tls_ca" {
     namespace = each.value.location
   }
   data = {
-    "ca.crt"  = try(file(local_file.ca_crt.filename), "${path.module}/README.md")
+    "ca.crt"  = try(file(local_file.int_crt.filename), "${path.module}/README.md")
     "tls.crt" = try(file(local_file.subordinate_crt[each.key].filename), "${path.module}/README.md")
     "tls.key" = try(file(local_file.subordinate_key[each.key].filename), "${path.module}/README.md")
   }
@@ -186,11 +196,11 @@ resource "helm_release" "vault" {
   }
   set {
     name  = "agent.image.tag"
-    value = "1.15.1"
+    value = "1.17.3"
   }
   set {
     name  = "injector.agentImage.tag"
-    value = "1.15.1"
+    value = "1.17.3"
   }
   set {
     name  = "server.image.repository"
@@ -198,7 +208,7 @@ resource "helm_release" "vault" {
   }
   set {
     name  = "server.image.tag"
-    value = "1.15.1-ent"
+    value = "1.17.3-ent"
   }
   set {
     name  = "agentImage.repository"
@@ -206,7 +216,7 @@ resource "helm_release" "vault" {
   }
   set {
     name  = "agentImage.tag"
-    value = "1.15.1"
+    value = "1.17.3"
   }
   # set {
   #   name  = "livenessProbe.enabled"
@@ -350,7 +360,7 @@ resource "helm_release" "vault_operator" {
   namespace  = each.key
   repository = "https://helm.releases.hashicorp.com"
   chart      = "vault-secrets-operator"
-  version    = "0.3.2"
+  version    = "0.8.1"
 }
 
 
@@ -375,41 +385,41 @@ resource "kubernetes_namespace" "telemetry" {
 #     "${file("${path.root}/config/promtail-values.yml")}"
 #   ]
 # }
-resource "helm_release" "loki" {
-  name       = "loki"
-  repository = "https://grafana.github.io/helm-charts"
-  chart      = "loki"
-  version    = "5.35.0"
-  namespace  = kubernetes_namespace.telemetry.id
-  set {
-    name  = "loki.auth_enabled"
-    value = false
-  }
-  set {
-    name  = "loki.commonConfig.replication_factor"
-    value = "1"
-  }
-  set {
-    name  = "loki.commonConfig.storage.type"
-    value = "filesystem"
-  }
-  set {
-    name  = "singleBinary.replicas"
-    value = "1"
-  }
-  values = [
-    "${file("${path.root}/config/loki-values.yml")}"
-  ]
-}
-resource "helm_release" "promtail" {
-  name       = "promtail"
-  repository = "https://grafana.github.io/helm-charts"
-  chart      = "promtail"
-  version    = "6.15.3"
-  namespace  = kubernetes_namespace.telemetry.id
-  values = [
-    "${file("${path.root}/config/promtail-values.yml")}"
-  ]
-}
+# resource "helm_release" "loki" {
+#   name       = "loki"
+#   repository = "https://grafana.github.io/helm-charts"
+#   chart      = "loki"
+#   version    = "5.35.0"
+#   namespace  = kubernetes_namespace.telemetry.id
+#   set {
+#     name  = "loki.auth_enabled"
+#     value = false
+#   }
+#   set {
+#     name  = "loki.commonConfig.replication_factor"
+#     value = "1"
+#   }
+#   set {
+#     name  = "loki.commonConfig.storage.type"
+#     value = "filesystem"
+#   }
+#   set {
+#     name  = "singleBinary.replicas"
+#     value = "1"
+#   }
+#   values = [
+#     "${file("${path.root}/config/loki-values.yml")}"
+#   ]
+# }
+# resource "helm_release" "promtail" {
+#   name       = "promtail"
+#   repository = "https://grafana.github.io/helm-charts"
+#   chart      = "promtail"
+#   version    = "6.15.3"
+#   namespace  = kubernetes_namespace.telemetry.id
+#   values = [
+#     "${file("${path.root}/config/promtail-values.yml")}"
+#   ]
+# }
 
 # 

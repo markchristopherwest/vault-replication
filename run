@@ -225,52 +225,52 @@ kubectl -n south exec vault-dr-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:820
 
 # Setup Performance Replication
 
-# # On the primary cluster, create a superuser policy.
-# kubectl cp ./policy/superuser.hcl north/vault-primary-0:/tmp/superuser.hcl
-# kubectl -n north exec vault-primary-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
-#   vault policy write superuser /tmp/superuser.hcl"
+# On the primary cluster, create a superuser policy.
+kubectl cp ./policy/superuser.hcl north/vault-primary-0:/tmp/superuser.hcl
+kubectl -n north exec vault-primary-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+  vault policy write superuser /tmp/superuser.hcl"
 
-# # Enable the userpass auth method.
-# kubectl -n north exec vault-primary-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
-#   vault auth enable userpass"
+# Enable the userpass auth method.
+kubectl -n north exec vault-primary-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+  vault auth enable userpass"
 
-# # Create a new user named tester in userpass where the password is changeme and superuser policy is attached.
-# kubectl -n north exec vault-primary-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
-#   vault write auth/userpass/users/tester password=\"changeme\" policies=\"superuser\""
+# Create a new user named tester in userpass where the password is changeme and superuser policy is attached.
+kubectl -n north exec vault-primary-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+  vault write auth/userpass/users/tester password=\"changeme\" policies=\"superuser\""
 
-# # To activate the primary, run:
-# kubectl -n north exec vault-primary-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
-#   vault write -format=json -f sys/replication/performance/primary/enable"
+# To activate the primary, run:
+kubectl -n north exec vault-primary-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+  vault write -format=json -f sys/replication/performance/primary/enable"
 
-# # To fetch a secondary bootstrap token, run:
+# To fetch a secondary bootstrap token, run:
 
-# kubectl -n north exec vault-primary-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
-#   vault write sys/replication/performance/primary/secondary-token \
-#     id=vault-pr-east-0.vault-pr-east-internal.east.svc.cluster.local \
-#     -format=json" >  externals/vault_write_sys_replication_performance_primary_enable_pr_east.json
-
-
-# kubectl -n north exec vault-primary-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
-#   vault write sys/replication/performance/primary/secondary-token \
-#     id=vault-pr-west-0.vault-pr-west-internal.west.svc.cluster.local \
-#     -format=json" >  externals/vault_write_sys_replication_performance_primary_enable_pr_west.json
+kubectl -n north exec vault-primary-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+  vault write sys/replication/performance/primary/secondary-token \
+    id=vault-pr-east-0.vault-pr-east-internal.east.svc.cluster.local \
+    -format=json" >  externals/vault_write_sys_replication_performance_primary_enable_pr_east.json
 
 
-# # To activate a secondary using the fetched token, run:
-# PR_TOKEN_EAST=$(cat  externals/vault_write_sys_replication_performance_primary_enable_pr_east.json | jq -r .wrap_info.token )
+kubectl -n north exec vault-primary-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+  vault write sys/replication/performance/primary/secondary-token \
+    id=vault-pr-west-0.vault-pr-west-internal.west.svc.cluster.local \
+    -format=json" >  externals/vault_write_sys_replication_performance_primary_enable_pr_west.json
 
-# kubectl -n east exec vault-pr-east-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
-#   vault write sys/replication/performance/secondary/enable \
-#     ca_file=/vault/userconfig/vault-pr-east/ca.crt \
-#     ca_path=/vault/userconfig/vault-pr-east/ \
-#     token=\"$PR_TOKEN_EAST\" \
-#     primary_api_addr=https://vault-primary-0.vault-primary-internal.north.svc.cluster.local:8200"
 
-# PR_TOKEN_WEST=$(cat  externals/vault_write_sys_replication_performance_primary_enable_pr_west.json | jq -r .wrap_info.token )
+# To activate a secondary using the fetched token, run:
+PR_TOKEN_EAST=$(cat  externals/vault_write_sys_replication_performance_primary_enable_pr_east.json | jq -r .wrap_info.token )
 
-# kubectl -n west exec vault-pr-west-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
-#   vault write sys/replication/performance/secondary/enable \
-#     ca_file=/vault/userconfig/vault-pr-west/ca.crt \
-#     ca_path=/vault/userconfig/vault-pr-west/ \
-#     token=\"$PR_TOKEN_WEST\" \
-#     primary_api_addr=https://vault-primary-0.vault-primary-internal.north.svc.cluster.local:8200"
+kubectl -n east exec vault-pr-east-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+  vault write sys/replication/performance/secondary/enable \
+    ca_file=/vault/userconfig/vault-pr-east/ca.crt \
+    ca_path=/vault/userconfig/vault-pr-east/ \
+    token=\"$PR_TOKEN_EAST\" \
+    primary_api_addr=https://vault-primary-0.vault-primary-internal.north.svc.cluster.local:8200"
+
+PR_TOKEN_WEST=$(cat  externals/vault_write_sys_replication_performance_primary_enable_pr_west.json | jq -r .wrap_info.token )
+
+kubectl -n west exec vault-pr-west-0 -- /bin/sh -c "VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true \
+  vault write sys/replication/performance/secondary/enable \
+    ca_file=/vault/userconfig/vault-pr-west/ca.crt \
+    ca_path=/vault/userconfig/vault-pr-west/ \
+    token=\"$PR_TOKEN_WEST\" \
+    primary_api_addr=https://vault-primary-0.vault-primary-internal.north.svc.cluster.local:8200"

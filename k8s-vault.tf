@@ -16,11 +16,13 @@ locals {
       location = "west"
     },
   }
-  helm_release_version = "0.8.1"
-  regions              = ["north", "south", "east", "west"]
+  regions = ["north", "south", "east", "west"]
   standard_tags = {
     whoami = data.external.whoami.result["whoami"]
   }
+  vault_version                  = "1.18.1"
+  vault_helm_release_version     = "0.28.0"
+  vault_secrets_operator_version = "0.9.0"
 }
 data "external" "whoami" {
   program = ["${path.module}/externals/external-whoami.sh"]
@@ -36,8 +38,10 @@ module "tls_automagically" {
   product_manifest  = local.cluster_manifest
   organization_name = "${format("%s", data.external.whoami.result["whoami"])} Unlimited"
   common_name_ca    = "${replace(format("%s", data.external.whoami.result["whoami"]), ".", "-")}.local"
-  common_name_int   = "${replace(format("%s", random_pet.env.id), "_", "-")}.${replace(format("%s", data.external.whoami.result["whoami"]), ".", "-")}.local"
+  common_name_int   = "${replace(resource.random_pet.env.id, "_", "-")}.${replace(format("%s", data.external.whoami.result["whoami"]), ".", "-")}.local"
   dns_names = concat(
+    formatlist("localhost"),
+    formatlist("${replace(format("%s", data.external.whoami.result["whoami"]), ".", "-")}"),
     formatlist("vault-%s.vault-%s-internal", keys(local.cluster_manifest), keys(local.cluster_manifest)),
     formatlist("vault-%s-0.vault-%s-internal", keys(local.cluster_manifest), keys(local.cluster_manifest)),
     formatlist("vault-%s-1.vault-%s-internal", keys(local.cluster_manifest), keys(local.cluster_manifest)),
@@ -141,7 +145,7 @@ resource "helm_release" "vault" {
   namespace  = each.value.location
   repository = "https://helm.releases.hashicorp.com"
   chart      = "vault"
-  version    = "0.25.0"
+  version    = local.vault_helm_release_version
   set {
     name  = "global.certs.certName"
     value = "vault-tls-${each.key}"
@@ -196,11 +200,11 @@ resource "helm_release" "vault" {
   }
   set {
     name  = "agent.image.tag"
-    value = "1.17.3"
+    value = local.vault_version
   }
   set {
     name  = "injector.agentImage.tag"
-    value = "1.17.3"
+    value = local.vault_version
   }
   set {
     name  = "server.image.repository"
@@ -208,7 +212,7 @@ resource "helm_release" "vault" {
   }
   set {
     name  = "server.image.tag"
-    value = "1.17.3-ent"
+    value = "${local.vault_version}-ent"
   }
   set {
     name  = "agentImage.repository"
@@ -216,7 +220,7 @@ resource "helm_release" "vault" {
   }
   set {
     name  = "agentImage.tag"
-    value = "1.17.3"
+    value = local.vault_version
   }
   # set {
   #   name  = "livenessProbe.enabled"
@@ -360,21 +364,23 @@ resource "helm_release" "vault_operator" {
   namespace  = each.key
   repository = "https://helm.releases.hashicorp.com"
   chart      = "vault-secrets-operator"
-  version    = "0.8.1"
+  version    = local.vault_secrets_operator_version
+
+  depends_on = [helm_release.vault, kubernetes_namespace.example]
 }
 
 
-resource "kubernetes_namespace" "telemetry" {
-  metadata {
-    annotations = {
-      name = "telemetry"
-    }
-    labels = {
-      mylabel = "label-telemetry"
-    }
-    name = "telemetry"
-  }
-}
+# resource "kubernetes_namespace" "telemetry" {
+#   metadata {
+#     annotations = {
+#       name = "telemetry"
+#     }
+#     labels = {
+#       mylabel = "label-telemetry"
+#     }
+#     name = "telemetry"
+#   }
+# }
 # resource "helm_release" "cadvisor" {
 #   name       = "cadvisor"
 #   repository = "https://grafana.github.io/helm-charts"
